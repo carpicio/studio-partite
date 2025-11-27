@@ -10,12 +10,12 @@ import re
 import os
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="⚽ Dashboard Tattica V32", layout="wide", page_icon="⚽")
+st.set_page_config(page_title="⚽ Dashboard Tattica V30 Fix", layout="wide", page_icon="⚽")
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- TITOLO ---
-st.title("💎 Dashboard Analisi Calcio V32")
-st.markdown("**Analisi Tattica, Ritmo Gol & Previsioni (Fix GitHub)**")
+st.title("💎 Dashboard Analisi Calcio V30 (Fix)")
+st.markdown("**Analisi Tattica, Ritmo Gol & Previsioni**")
 st.divider()
 
 # ==========================================
@@ -23,50 +23,26 @@ st.divider()
 # ==========================================
 with st.sidebar:
     st.header("📂 Gestione Dati")
-    
-    # Opzione 1: Caricamento Manuale
     uploaded_file = st.file_uploader("Carica il file (CSV/Excel)", type=['csv', 'xlsx'])
-    
-    # Opzione 2: File Default su GitHub
-    # NOME ESATTO DEL FILE SU GITHUB
-    default_file = 'eng_tot_1.csv' 
-    
-    file_to_use = None
-    
-    if uploaded_file is not None:
-        file_to_use = uploaded_file
-        st.success("File manuale caricato.")
-    elif os.path.exists(default_file):
-        file_to_use = default_file
-        st.info(f"File predefinito trovato: {default_file}")
-    else:
-        st.warning(f"File '{default_file}' non trovato nel repository.")
-        st.warning("Per favore carica un file manualmente qui sopra ☝️")
-        st.stop()
+
+if uploaded_file is None:
+    st.info("👈 Carica un file dal menu laterale per iniziare.")
+    st.stop()
 
 @st.cache_data
-def load_data(file_input, is_path=False):
+def load_data(file):
     try:
-        # Logica di lettura file
-        if is_path:
-             with open(file_input, 'r', encoding='latin1', errors='replace') as f:
-                line = f.readline()
-                sep = ';' if line.count(';') > line.count(',') else ','
-             df = pd.read_csv(file_input, sep=sep, encoding='latin1', on_bad_lines='skip', low_memory=False, header=None)
-        else:
-            try:
-                line = file_input.readline().decode('latin1')
-                file_input.seek(0)
-                sep = ';' if line.count(';') > line.count(',') else ','
-                df = pd.read_csv(file_input, sep=sep, encoding='latin1', on_bad_lines='skip', low_memory=False, header=None)
-            except:
-                file_input.seek(0)
-                df = pd.read_excel(file_input, header=None)
+        # Tenta lettura CSV
+        try:
+            line = file.readline().decode('latin1')
+            file.seek(0) 
+            sep = ';' if line.count(';') > line.count(',') else ','
+            df = pd.read_csv(file, sep=sep, encoding='latin1', on_bad_lines='skip', low_memory=False, header=None)
+        except:
+            df = pd.read_excel(file, header=None)
 
         # Header
         header = df.iloc[0].astype(str).str.strip().str.upper().tolist()
-        
-        # Unicità Colonne
         seen = {}
         unique_header = []
         for col in header:
@@ -98,10 +74,10 @@ def load_data(file_input, is_path=False):
                         df.rename(columns={found: target}, inplace=True)
                         break
         
-        # Pulizia dati sicura
+        # Pulizia dati
         for c in ['PAESE', 'LEGA', 'CASA', 'OSPITE']:
             if c in df.columns:
-                df[c] = df[c].astype(str).apply(lambda x: x.strip())
+                df[c] = df[c].astype(str).str.strip()
 
         # ID Lega
         if 'PAESE' in df.columns:
@@ -115,15 +91,13 @@ def load_data(file_input, is_path=False):
         st.error(f"Errore caricamento: {e}")
         return pd.DataFrame()
 
-# Caricamento effettivo
-is_path = isinstance(file_to_use, str)
-df = load_data(file_to_use, is_path)
+df = load_data(uploaded_file)
 
 if df.empty:
     st.error("File vuoto o non valido.")
     st.stop()
 
-st.sidebar.success(f"✅ Dati pronti: {len(df)} righe")
+st.sidebar.success(f"✅ Caricato: {len(df)} righe")
 
 # ==========================================
 # 2. SELEZIONE DATI
@@ -132,9 +106,18 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     leghe = sorted(df['ID_LEGA'].unique())
-    sel_lega = st.selectbox("🏆 Campionato", leghe)
+    sel_lega = st.selectbox("🏆 Seleziona Campionato", leghe)
 
-df_league = df[df['ID_LEGA'] == sel_lega].copy()
+# CREAZIONE SICURA DI DF_LEAGUE
+if sel_lega:
+    df_league = df[df['ID_LEGA'] == sel_lega].copy()
+else:
+    df_league = pd.DataFrame() # Vuoto se nulla è selezionato
+
+if df_league.empty:
+    st.warning("Nessuna partita trovata per questo campionato.")
+    st.stop()
+
 teams = sorted(pd.concat([df_league['CASA'], df_league['OSPITE']]).unique())
 
 with col2:
@@ -145,7 +128,7 @@ with col3:
     sel_away = st.selectbox("✈️ Squadra Ospite", teams, index=idx_away)
 
 # ==========================================
-# 3. ANALISI
+# 3. ENGINE DI ANALISI
 # ==========================================
 if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
     st.divider()
@@ -168,8 +151,9 @@ if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
     c_h = 'GOALMINH' if 'GOALMINH' in df_league.columns else 'GOALMINCASA'
     c_a = 'GOALMINA' if 'GOALMINA' in df_league.columns else 'GOALMINOSPITE'
 
-    goals_h = {'FT': 0, 'HT': 0, 'S_FT': 0, 'S_HT': 0}
-    goals_a = {'FT': 0, 'HT': 0, 'S_FT': 0, 'S_HT': 0}
+    # Accumulatori
+    goals_h = {'FT': 0, 'HT': 0, '2T': 0, 'S_FT': 0, 'S_HT': 0, 'S_2T': 0}
+    goals_a = {'FT': 0, 'HT': 0, '2T': 0, 'S_FT': 0, 'S_HT': 0, 'S_2T': 0}
     match_h, match_a = 0, 0
     times_h, times_a, times_league = [], [], []
     
@@ -212,16 +196,24 @@ if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
             match_h += 1
             goals_h['FT'] += len(min_h)
             goals_h['HT'] += len([x for x in min_h if x <= 45])
+            goals_h['2T'] += len([x for x in min_h if x > 45])
+            
             goals_h['S_FT'] += len(min_a)
             goals_h['S_HT'] += len([x for x in min_a if x <= 45])
+            goals_h['S_2T'] += len([x for x in min_a if x > 45])
+            
             if min_h: times_h.append(min(min_h))
         
         if a == sel_away:
             match_a += 1
             goals_a['FT'] += len(min_a)
             goals_a['HT'] += len([x for x in min_a if x <= 45])
+            goals_a['2T'] += len([x for x in min_a if x > 45])
+            
             goals_a['S_FT'] += len(min_h)
             goals_a['S_HT'] += len([x for x in min_h if x <= 45])
+            goals_a['S_2T'] += len([x for x in min_h if x > 45])
+            
             if min_a: times_a.append(min(min_a))
 
     # Medie
@@ -237,12 +229,15 @@ if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
     avg_a_conc_ft = safe_div(goals_a['S_FT'], match_a)
     avg_a_conc_ht = safe_div(goals_a['S_HT'], match_a)
 
-    # Display Medie
     c1, c2 = st.columns(2)
     with c1:
-        st.info(f"**🏠 {sel_home}** ({match_h} match)\n\n1°T: {avg_h_ht:.2f} F / {avg_h_conc_ht:.2f} S\n\nFIN: {avg_h_ft:.2f} F / {avg_h_conc_ft:.2f} S")
+        st.info(f"**🏠 {sel_home}** ({match_h} match)\n\n"
+                f"**1°T:** F {avg_h_ht:.2f} | S {avg_h_s_ht:.2f}\n\n"
+                f"**FIN:** F {avg_h_ft:.2f} | S {avg_h_conc_ft:.2f}")
     with c2:
-        st.warning(f"**✈️ {sel_away}** ({match_a} match)\n\n1°T: {avg_a_ht:.2f} F / {avg_a_conc_ht:.2f} S\n\nFIN: {avg_a_ft:.2f} F / {avg_a_conc_ft:.2f} S")
+        st.warning(f"**✈️ {sel_away}** ({match_a} match)\n\n"
+                 f"**1°T:** F {avg_a_ht:.2f} | S {avg_a_s_ht:.2f}\n\n"
+                 f"**FIN:** F {avg_a_ft:.2f} | S {avg_a_conc_ft:.2f}")
 
     # Poisson
     exp_h_ft = (avg_h_ft + avg_a_conc_ft) / 2
@@ -250,36 +245,28 @@ if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
     exp_h_ht = (avg_h_ht + avg_a_conc_ht) / 2
     exp_a_ht = (avg_a_ht + avg_h_conc_ht) / 2
 
-    def calc_poisson_probs(lam_h, lam_a):
+    def calc_poisson(lam_h, lam_a):
         probs = np.zeros((6, 6))
         for i in range(6):
             for j in range(6):
                 probs[i][j] = poisson.pmf(i, lam_h) * poisson.pmf(j, lam_a)
-        p1 = np.sum(np.tril(probs, -1))
-        px = np.sum(np.diag(probs))
-        p2 = np.sum(np.triu(probs, 1))
-        pu25 = 0
-        for i in range(6):
-            for j in range(6):
-                if i+j <= 2: pu25 += probs[i][j]
-        return p1, px, p2, pu25
+        return np.sum(np.tril(probs, -1)), np.sum(np.diag(probs)), np.sum(np.triu(probs, 1))
 
-    p1_ft, px_ft, p2_ft, pu25_ft = calc_poisson_probs(exp_h_ft, exp_a_ft)
+    p1_ft, px_ft, p2_ft = calc_poisson(exp_h_ft, exp_a_ft)
     prob_00_ht = poisson.pmf(0, exp_h_ht) * poisson.pmf(0, exp_a_ht)
     prob_u15_ht = prob_00_ht + (poisson.pmf(1, exp_h_ht) * poisson.pmf(0, exp_a_ht)) + (poisson.pmf(0, exp_h_ht) * poisson.pmf(1, exp_a_ht))
     
     def to_odd(p): return round(1/p, 2) if p > 0 else 99.00
 
     st.subheader("🎲 Previsioni & Quote Implicite")
-    k1, k2, k3 = st.columns(3)
-    k1.metric("1X2 Finale", f"1: {p1_ft*100:.0f}%", f"Quota: {to_odd(p1_ft)}")
-    k1.caption(f"X: {px_ft*100:.0f}% (@{to_odd(px_ft)}) | 2: {p2_ft*100:.0f}% (@{to_odd(p2_ft)})")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("1X2 Finale", f"1: {p1_ft*100:.0f}%", f"Quota: {to_odd(p1_ft)}")
+    c1.caption(f"X: {px_ft*100:.0f}% (@{to_odd(px_ft)}) | 2: {p2_ft*100:.0f}% (@{to_odd(p2_ft)})")
     
-    k2.metric("O/U 2.5 FT", f"Over: {(1-pu25_ft)*100:.0f}%", f"@{to_odd(1-pu25_ft)}")
-    k2.caption(f"Under: {pu25_ft*100:.0f}% (@{to_odd(pu25_ft)})")
+    c2.metric("O/U 2.5 FT", f"Over: {(1-(poisson.cdf(2, exp_h_ft+exp_a_ft)))*100:.0f}%") # approx
     
-    k3.metric("1° Tempo", f"0-0: {prob_00_ht*100:.0f}%", f"@{to_odd(prob_00_ht)}")
-    k3.caption(f"Under 1.5: {prob_u15_ht*100:.0f}% (@{to_odd(prob_u15_ht)})")
+    c3.metric("1° Tempo", f"0-0: {prob_00_ht*100:.0f}%", f"Quota: {to_odd(prob_00_ht)}")
+    c3.caption(f"Under 1.5: {prob_u15_ht*100:.0f}% (@{to_odd(prob_u15_ht)})")
 
     st.divider()
 
@@ -309,6 +296,7 @@ if st.button("🚀 AVVIA ANALISI MATCH", type="primary"):
             plt.axhline(y=0.5, color='green', linestyle=':', label='Mediana (50%)')
             plt.title(f"Tempo al 1° Gol: {sel_home} (~{med_h:.0f}') vs {sel_away} (~{med_a:.0f}')")
             plt.grid(True, alpha=0.3)
+            plt.axvline(45, color='green', linestyle='--')
             plt.legend()
             st.pyplot(fig)
         else:
